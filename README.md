@@ -1,5 +1,47 @@
 # Instant Neural Graphics Primitives ![](https://github.com/NVlabs/instant-ngp/workflows/CI/badge.svg)
 
+Install instant ngp as instructed below. 
+Then put your dataset folder in "instant-ngp-emavfi/data/nerf/",make sure the dataset are created using instantngp-dataloader
+Modify your BASE_PATH in creat_colmap_test.sh, create_colmap.sh and gen_test_nerf.sh. 
+Double check that your image folder directry is correct for each bash script.
+
+After creating the correct dataset and move the dataset to the correct folder, run
+```sh
+instant-ngp$ python get_nerf_test.py --frame FRAME_NUMBER$ 
+```
+to get a nerf train/test split. for example, for dataset_18, run
+```sh
+instant-ngp$ python get_nerf_test.py --frame 18$
+```
+Make sure to make all the bash script executable by using 
+```sh
+instant-ngp$ chmod +x BASH_SCRIPT_NAME.sh$$
+```
+
+Run these two bash script to generate colmap, wait to make sure colmap are successfully generated
+```sh
+instant-ngp$ ./creat_colmap.sh 18
+```
+
+```sh
+instant-ngp$ ./creat_colmap_test.sh 18
+```
+Then it's time to train nerf and get psnr score. For some image dataset with less frames, colmap generated for nerf testing might include repeated frames
+from nerf training, run the script below to see a list of repeated frames' indices
+```sh
+instant-ngp$ python get_repeat_test_transform.py --frame 18
+```
+after running this scirpt, an output like "0 2 5 8" might display in the end of your termnial. use this as the INT_LIST argument for gen_test_nerf.sh
+```sh
+instant-ngp$ python get_repeat_test_transform.py 18 "0 2 5 8"
+```
+if there are no repeated frames, then just run
+```sh
+instant-ngp$ python get_repeat_test_transform.py 18 
+```
+
+
+
 <img src="docs/assets_readme/fox.gif" height="342"/> <img src="docs/assets_readme/robot5.gif" height="342"/>
 
 Ever wanted to train a NeRF model of a fox in under 5 seconds? Or fly around a scene captured from photos of a factory robot? Of course you have!
