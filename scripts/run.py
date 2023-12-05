@@ -23,21 +23,28 @@ from scenes import *
 from tqdm import tqdm
 
 import pyngp as ngp # noqa
+import matplotlib.pyplot as plt
+from skimage.io import imread
+import gen_masks
+from rembg import remove 
+from PIL import Image, ImageOps
 
 def parse_args():
 	parser = argparse.ArgumentParser(description="Run instant neural graphics primitives with additional configuration & output options")
 
 	parser.add_argument("files", nargs="*", help="Files to be loaded. Can be a scene, network config, snapshot, camera path, or a combination of those.")
-
+	parser.add_argument("--run_infer",default=False,  type=bool,help="taggle to run psnr on infer or not")
 	parser.add_argument("--scene", "--training_data", default="", help="The scene to load. Can be the scene's name or a full path to the training data. Can be NeRF dataset, a *.obj/*.stl mesh for training a SDF, an image, or a *.nvdb volume.")
 	parser.add_argument("--mode", default="", type=str, help=argparse.SUPPRESS) # deprecated
 	parser.add_argument("--network", default="", help="Path to the network config. Uses the scene's default if unspecified.")
 
 	parser.add_argument("--load_snapshot", "--snapshot", default="", help="Load this snapshot before training. recommended extension: .ingp/.msgpack")
 	parser.add_argument("--save_snapshot", default="", help="Save this snapshot after training. recommended extension: .ingp/.msgpack")
+	parser.add_argument("--save_gif", default="gifname", help="the gif on test transform")
 
 	parser.add_argument("--nerf_compatibility", action="store_true", help="Matches parameters with original NeRF. Can cause slowness and worse results on some scenes, but helps with high PSNR on synthetic scenes.")
 	parser.add_argument("--test_transforms", default="", help="Path to a nerf style transforms json from which we will compute PSNR.")
+	parser.add_argument('--int_list', nargs='+', type=int, default = [],help='List of integers')
 	parser.add_argument("--near_distance", default=-1, type=float, help="Set the distance from the camera at which training rays start for nerf. <0 means use ngp default")
 	parser.add_argument("--exposure", default=0.0, type=float, help="Controls the brightness of the image. Positive numbers increase brightness, negative numbers decrease it.")
 
@@ -48,8 +55,8 @@ def parse_args():
 
 	parser.add_argument("--video_camera_path", default="", help="The camera path to render, e.g., base_cam.json.")
 	parser.add_argument("--video_camera_smoothing", action="store_true", help="Applies additional smoothing to the camera trajectory with the caveat that the endpoint of the camera path may not be reached.")
-	parser.add_argument("--video_fps", type=int, default=60, help="Number of frames per second.")
-	parser.add_argument("--video_n_seconds", type=int, default=1, help="Number of seconds the rendered video should be long.")
+	parser.add_argument("--video_fps", type=int, default=15, help="Number of frames per second.")
+	parser.add_argument("--video_n_seconds", type=int, default=3, help="Number of seconds the rendered video should be long.")
 	parser.add_argument("--video_render_range", type=int, nargs=2, default=(-1, -1), metavar=("START_FRAME", "END_FRAME"), help="Limit output to frames between START_FRAME and END_FRAME (inclusive)")
 	parser.add_argument("--video_spp", type=int, default=8, help="Number of samples per pixel. A larger number means less noise, but slower rendering.")
 	parser.add_argument("--video_output", type=str, default="video.mp4", help="Filename of the output video (video.mp4) or video frames (video_%%04d.png).")
@@ -231,15 +238,76 @@ if __name__ == "__main__":
 
 		testbed.shall_train = False
 		testbed.load_training_data(args.test_transforms)
-
+		ref_images_to_display = []
+		output_images_to_display = []
+		# print("range(testbed.nerf.training.dataset.n_images," , range(testbed.nerf.training.dataset.n_images))
+		
 		with tqdm(range(testbed.nerf.training.dataset.n_images), unit="images", desc=f"Rendering test frame") as t:
+			print(t)
 			for i in t:
+				# print(testbed.nerf.training.dataset.metadata[i])
+				# print()
+				
+				if i in args.int_list:
+					continue
+				# print("index",i)
+				# if args.run_infer and i % 12 != 0:
+				# 	continue
+				# print("index of attached images",i)
 				resolution = testbed.nerf.training.dataset.metadata[i].resolution
 				testbed.render_ground_truth = True
 				testbed.set_camera_to_training_view(i)
 				ref_image = testbed.render(resolution[0], resolution[1], 1, True)
 				testbed.render_ground_truth = False
 				image = testbed.render(resolution[0], resolution[1], spp, True)
+
+
+				img_ref = np.copy(ref_image)	
+				img_ref[...,0:3] = np.divide(img_ref[...,0:3], img_ref[...,3:4], out=np.zeros_like(img_ref[...,0:3]), where=img_ref[...,3:4] != 0)
+				img_ref[...,0:3] = linear_to_srgb(img_ref[...,0:3])
+				img_ref = (np.clip(img_ref, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+
+				img_ = np.copy(image)	
+				img_[...,0:3] = np.divide(img_[...,0:3], img_[...,3:4], out=np.zeros_like(img_[...,0:3]), where=img_[...,3:4] != 0)
+				img_[...,0:3] = linear_to_srgb(img_[...,0:3])
+				img_ = (np.clip(img_, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+				
+
+				bg_rm_ref = remove(img_ref) 
+				bg_rm_img = remove(img_) 
+				plt.imshow(bg_rm_img)
+				plt.title("bg_rm_img")
+				plt.axis('off')  # Turn off axis numbers for a cleaner look
+				plt.show()
+
+				# mask_ref = gen_masks.mask_largest_object(bg_rm_ref)
+				# mask_ref = mask_ref
+				# mask_ref_expanded = np.repeat(mask_ref[:, :, np.newaxis], 3, axis=2)
+				# masked_ref_image = bg_rm_ref[..., :3] * mask_ref_expanded
+				# masked_ref_image_with_alpha = np.concatenate((masked_ref_image, bg_rm_ref[..., 3:4]), axis=2)
+				# plt.imshow(masked_ref_image)
+				# plt.title("Reference Image")
+				# plt.axis('off')  # Turn off axis numbers for a cleaner look
+				# plt.show()
+				mask_ref = gen_masks.mask_largest_object(bg_rm_ref[..., :3])  # Apply only to the RGB channels			
+				mask_ref_expanded = np.repeat(mask_ref[:, :, np.newaxis], 3, axis=2)
+				masked_ref_image_rgb = bg_rm_ref[..., :3] * mask_ref_expanded
+
+				mask_img = gen_masks.mask_largest_object(bg_rm_img[..., :3])  # Apply only to the RGB channels			
+				mask_img_expanded = np.repeat(mask_img[:, :, np.newaxis], 3, axis=2)
+				masked_image_rgb = bg_rm_img[..., :3] * mask_img_expanded
+
+
+				# masked_image_rgb = bg_rm_img[..., :3] * mask_ref_expanded
+				ref_images_to_display.append(masked_ref_image_rgb)
+				output_images_to_display.append(masked_image_rgb)
+				masked_ref_image_with_alpha = np.concatenate((masked_ref_image_rgb, bg_rm_ref[..., 3:4]), axis=2)
+
+				# Display the masked image with the original alpha channel
+				plt.imshow(masked_image_rgb)
+				plt.title("Masked output Image")
+				plt.axis('off')  # Turn off axis numbers for a cleaner look
+				plt.show()
 
 				if i == 0:
 					write_image(f"ref.png", ref_image)
@@ -249,8 +317,12 @@ if __name__ == "__main__":
 					diffimg[...,3:4] = 1.0
 					write_image("diff.png", diffimg)
 
-				A = np.clip(linear_to_srgb(image[...,:3]), 0.0, 1.0)
-				R = np.clip(linear_to_srgb(ref_image[...,:3]), 0.0, 1.0)
+				A = np.clip(linear_to_srgb(masked_image_rgb), 0.0, 1.0)
+				R = np.clip(linear_to_srgb(masked_ref_image_rgb), 0.0, 1.0)
+
+				
+
+				
 				mse = float(compute_error("MSE", A, R))
 				ssim = float(compute_error("SSIM", A, R))
 				totssim += ssim
@@ -261,11 +333,66 @@ if __name__ == "__main__":
 				maxpsnr = psnr if psnr>maxpsnr else maxpsnr
 				totcount = totcount+1
 				t.set_postfix(psnr = totpsnr/(totcount or 1))
+				
+
+				# #original
+				# resolution = testbed.nerf.training.dataset.metadata[i].resolution
+				# testbed.render_ground_truth = True
+				# testbed.set_camera_to_training_view(i)
+				# ref_image = testbed.render(resolution[0], resolution[1], 1, True)
+				# testbed.render_ground_truth = False
+				# image = testbed.render(resolution[0], resolution[1], spp, True)
+
+				# if i == 0:
+				# 	write_image(f"ref.png", ref_image)
+				# 	write_image(f"out.png", image)
+
+				# 	diffimg = np.absolute(image - ref_image)
+				# 	diffimg[...,3:4] = 1.0
+				# 	write_image("diff.png", diffimg)
+
+				# A = np.clip(linear_to_srgb(image[...,:3]), 0.0, 1.0)
+				# R = np.clip(linear_to_srgb(ref_image[...,:3]), 0.0, 1.0)
+				# mse = float(compute_error("MSE", A, R))
+				# ssim = float(compute_error("SSIM", A, R))
+				# totssim += ssim
+				# totmse += mse
+				# psnr = mse2psnr(mse)
+				# totpsnr += psnr
+				# minpsnr = psnr if psnr<minpsnr else minpsnr
+				# maxpsnr = psnr if psnr>maxpsnr else maxpsnr
+				# totcount = totcount+1
+				# t.set_postfix(psnr = totpsnr/(totcount or 1))
 
 		psnr_avgmse = mse2psnr(totmse/(totcount or 1))
 		psnr = totpsnr/(totcount or 1)
 		ssim = totssim/(totcount or 1)
 		print(f"PSNR={psnr} [min={minpsnr} max={maxpsnr}] SSIM={ssim}")
+		num_images = len(ref_images_to_display)*2
+		print(f"there are {len(ref_images_to_display)} images")
+		cols = 4  # Number of columns in the grid
+		rows = (num_images + cols - 1) // cols  # Calculate rows needed
+
+		plt.figure(figsize=(15, rows * 3))
+		for idx, (ref_img, out_img) in enumerate(zip(ref_images_to_display, output_images_to_display)):
+			plt.subplot(rows, cols , idx * 2 + 1)
+			plt.imshow(ref_img)
+			plt.title(f'Ref Image {idx}')
+			plt.axis('off')
+
+			plt.subplot(rows, cols , idx * 2 + 2)
+			plt.imshow(out_img)
+			plt.title(f'Output Image {idx}')
+			plt.axis('off')
+
+		plt.tight_layout()
+		plt.show()
+
+		gif_path = f'../gif/{args.save_gif}.gif'
+		imageio.mimsave(gif_path, output_images_to_display, format='gif')
+
+
+
 
 	if args.save_mesh:
 		res = args.marching_cubes_res or 256
